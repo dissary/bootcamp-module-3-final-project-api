@@ -32,63 +32,72 @@ async function getPostgresVersion() {
 
 getPostgresVersion();
 
-// Show all user that book specific class
-app.get('/bookings/class/:class_id', async (req, res) => {
-  const { class_id } = req.params;
-  const client = await pool.connect();
-
-  try {
-  const bookings = await client.query(
-    'SELECT * FROM bookings WHERE class_id = $1',
-    [class_id]
-  );
-    res.json(bookings.rows);
-  } catch (error) {
-    console.log(error)
-    res.status(500).send("An error occured, please try again.")
-  } finally {
-    client.release();
-  }
-})
-
-// Unbook Classes
-app.delete('/bookings/:id', async(req,res) => {
-  const { id } = req.params;
-
-  const client = await pool.connect();
-
-  try {
-    await client.query('DELETE FROM bookings WHERE id = $1', [id]);
-
-    res.json({ message: "Unbook classes successfully."});
-  } catch (error) {
-    console.log(error)
-    res.status(500).send("An error occured, please try again.")
-  } finally {
-    client.release();
-  }
-})
-
 // Book Classes
-app.post('/bookings', async(req,res) => {
-  const { user_id, class_id } = req.body;
 
+app.post('/bookings', async (req, res) => {
   const client = await pool.connect();
 
   try {
-    const newBooking = await client.query('INSERT INTO bookings (user_id, class_id, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) RETURNING *', [user_id, class_id]);
+    const { user_id, class_id } = req.body;
 
-    res.json(newBooking.rows[0]);
+    if (!user_id || !class_id) {
+      return res.status(400).json({
+        message: "user_id and class_id are required"
+      });
+    }
+
+    const userCheck = await client.query(
+      'SELECT id FROM users WHERE id = $1',
+      [user_id]
+    );
+
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({
+        message: "User not found"
+      });
+    }
+
+    const classCheck = await client.query(
+      'SELECT id FROM classes WHERE id = $1',
+      [class_id]
+    );
+
+    if (classCheck.rows.length === 0) {
+      return res.status(404).json({
+        message: "Class not found"
+      });
+    }
+
+    const result = await client.query(
+      `INSERT INTO bookings (user_id, class_id)
+       VALUES ($1, $2)
+       RETURNING *`,
+      [user_id, class_id]
+    );
+
+    return res.status(201).json(result.rows[0]);
+
   } catch (error) {
-    console.log(error)
-    res.status(500).send("An error occured, please try again.")
+    console.error(error);
+
+    if (error.code === '23505') {
+      return res.status(400).json({
+        message: "You already booked this class"
+      });
+    }
+
+    return res.status(500).json({
+      message: "Server error while creating booking"
+    });
+
   } finally {
     client.release();
   }
-})
+});
 
-// Show All Classes
-app.get('/classes', async (req, res) => {
+// Show all Classes
+
+app.get('/classes', async(req, res) => {
   const client = await pool.connect();
 
   try {
@@ -96,144 +105,106 @@ app.get('/classes', async (req, res) => {
     const result = await client.query(query);
 
     res.json(result.rows);
-  } catch (err) {
-    console.log(err.stack);
-    res.status(500).send('An error occured');
+  } catch(error) {
+    console.error(error)
+    res.status(500).send('Show all class occurred.');
   } finally {
     client.release();
   }
 })
 
-// Update Specific Classes
-app.put('/classes/:id', async (req, res) => {
-  const id = req.params.id
-  const updatedData = req.body;
-  const client = await pool.connect();
+// Create Classes
 
-  try {
-    const updateQuery = 'UPDATE classes SET title = $1, description = $2, date = $3, time = $4 WHERE id = $5'
-    const queryData = [updatedData.title, updatedData,description, updatedData.date, updatedData.time, id]
-    await client.query(updateQuery, queryData);
-
-    res.json({  "message": "Class updated successfully."});
-  } catch (error) {
-    console.log("Error:", error.message);
-    res.status(500).send('An error occured');
-  } finally {
-    client.release();
-  }
-})
-
-// Delete Specific Classes
-app.delete('/classes/:id', async (req, res) => {
-  const id = req.params.id
-  const client = await pool.connect();
-
-  try {
-    const deleteQuery = 'DELETE FROM classes WHERE id = $1';
-    await client.query(deleteQuery, [id]);
-
-    res.json({ "message": "Class deleted successfully." });
-  } catch (error) {
-    console.log("Error:", error.message);
-    res.status(500).send('An error occured');
-  } finally {
-    client.release();
-  }
-})
-
-
-// Add Classes
 app.post('/classes', async(req, res) => {
-  const { user_id, title, description,  date, time } = req.body;
   const client = await pool.connect();
 
   try {
-    const userExists = await client.query('SELECT id FROM users WHERE id = $1', [user_id]);
+      const {
+      title,
+      description,
+      instructor,
+      start_time,
+      duration,
+      capacity
+    } = req.body;
 
-    if(userExists.rows.length > 0) {
-      const post = await client.query('INSERT INTO classes (user_id, title, description, date, time) VALUES ($1, $2, $3, $4, $5) RETURNING *', [user_id, title, description, date, time])
-      res.json(post.rows[0]);
-    } else {
-      res.status(400).json({ error: "User does not exist."});
-    }
-  } catch (error) {
-    console.log(error)
-      res.status(500).json({ error: "Something went wrong, please try again later!"});
-  } finally {
-    client.release();
-  }
-})
-
-
-// Sign Up
-app.post("/signup", async(req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const { email, password, phone_number } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    const userResult = await client.query(
-      "SELECT * FROM users WHERE email = $1", [email],
-    )
-
-    if(userResult.rows.length > 0) {
-      return res.status(400).json({ error: "Email already exists."});
+    if (!title || !instructor || !start_time || !duration || !capacity) {
+      return res.status(400).json({ message: "Missing required fields"})
     }
 
-    await client.query(
-      "INSERT INTO users (email, password, phone_number) VALUES ($1, $2, $3)",
-      [email, hashedPassword, phone_number],
+    const result = await client.query(
+      `INSERT INTO classes (title, description, instructor, start_time, duration, capacity)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [title, description, instructor, start_time, duration, capacity]
     )
 
-    res.status(201).json({ message: "Account created successfully!"});
+    res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Internal server error."});
+    res.status(500).send("Create class error");
   } finally {
     client.release();
   }
-});
 
-// Login 
+})
+
+// Sign Up
+
+app.post('/signup', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { username, email, password, phone_number } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const userResult = await client.query('SELECT * FROM users WHERE username = $1', [username]);
+
+    if (userResult.rows.length > 0) {
+      return res.status(400).json({ message: "Username is taken." });
+    }
+
+    const emailResult = await client.query('SELECT * FROM users WHERE email = $1', [email]);
+
+    if (emailResult.rows.length > 0) {
+      return res.status(400).json({ message: "Email is taken." });
+    }
+
+    await client.query('INSERT INTO users (username, email, password, phone_number) VALUES ($1, $2, $3, $4)'
+      , [username, email, hashedPassword, phone_number]
+    )
+
+    res.status(201).json({ message: "Sign up successfully."})
+  } catch(error) {
+    console.error(error)
+    res.status(500).send('Sign up error.');
+  } finally {
+    client.release();
+  }
+})
+
+// Log In
+
 app.post('/login', async(req, res) => {
   const client = await pool.connect();
 
   try {
-
-  const { email, password } = req.body;
-    const result = await client.query('SELECT * FROM users WHERE email = $1', [email]);
-
+    const { username, password } = req.body;
+    const result = await client.query('SELECT * FROM users WHERE username = $1', [username]);
     const user = result.rows[0];
 
-    if (!user) return res.status(400).json({ message: "Email or password incorrect."});
+    if (!user) return res.status(400).json({ message: "Username or password incorrect" });
 
     const passwordIsValid = await bcrypt.compare(password, user.password);
-    if(!passwordIsValid) return res.status(401).json({ auth: false, token: null});
 
-    var token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, { expiresIn: 86400 });
-    res.status(200).json({ auth: true, token: token});
+    if (!passwordIsValid) return res.status(401).json({ auth: false, token: null });
+
+    var token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: 86400 });
+    res.status(200).json({ auth: true, token: token });
   } catch(error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error."});
+    console.error(error)
+    res.status(500).send('Login error.');
   } finally {
     client.release();
-  }
-})
-
-app.get('/email', (req, res) => {
-  const authToken = req.headers.authorization;
-
-  if(!authToken) return res.status(401).json({ error: "Access Denied." });
-
-  try {
-    const verified = jwt.verify(authToken, SECRET_KEY);
-    res.json({
-      email: verified.email
-    })
-  } catch (err) {
-    res.status(400).json({ error: "Invalid Token." });
   }
 })
 
@@ -244,5 +215,3 @@ app.get("/", (req, res) => {
 app.listen(3000, () => {
   console.log("App is listening on port 3000");
 });
-
-
