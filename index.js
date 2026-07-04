@@ -32,120 +32,133 @@ async function getPostgresVersion() {
 
 getPostgresVersion();
 
-// Book Classes
+// Get Users username (done)
 
-app.post('/bookings', async (req, res) => {
-  const client = await pool.connect();
-
-  try {
-    const { user_id, class_id } = req.body;
-
-    if (!user_id || !class_id) {
-      return res.status(400).json({
-        message: "user_id and class_id are required"
-      });
-    }
-
-    const userCheck = await client.query(
-      'SELECT id FROM users WHERE id = $1',
-      [user_id]
-    );
-
-    if (userCheck.rows.length === 0) {
-      return res.status(404).json({
-        message: "User not found"
-      });
-    }
-
-    const classCheck = await client.query(
-      'SELECT id FROM classes WHERE id = $1',
-      [class_id]
-    );
-
-    if (classCheck.rows.length === 0) {
-      return res.status(404).json({
-        message: "Class not found"
-      });
-    }
-
-    const result = await client.query(
-      `INSERT INTO bookings (user_id, class_id)
-       VALUES ($1, $2)
-       RETURNING *`,
-      [user_id, class_id]
-    );
-
-    return res.status(201).json(result.rows[0]);
-
-  } catch (error) {
-    console.error(error);
-
-    if (error.code === '23505') {
-      return res.status(400).json({
-        message: "You already booked this class"
-      });
-    }
-
-    return res.status(500).json({
-      message: "Server error while creating booking"
-    });
-
-  } finally {
-    client.release();
-  }
-});
-
-// Show all Classes
-
-app.get('/classes', async(req, res) => {
-  const client = await pool.connect();
+app.get('/users/:user_id', async(req,res) => {
+  const client =await pool.connect();
+  const { user_id } = req.params;
 
   try {
-    const query = 'SELECT * FROM classes';
-    const result = await client.query(query);
+    const result = await client.query(`SELECT username FROM users WHERE id = $1`
+      , [user_id]
+    )
 
-    res.json(result.rows);
+    res.status(200).json(result.rows[0]);
   } catch(error) {
     console.error(error)
-    res.status(500).send('Show all class occurred.');
+    res.status(404).send({ message: "Get username failed."})
   } finally {
     client.release();
   }
 })
 
-// Create Classes
+// Booking (DONE)
 
-app.post('/classes', async(req, res) => {
+app.post('/bookings', async(req, res) => {
   const client = await pool.connect();
+  const { class_id, user_id } = req.body;
 
-  try {
-      const {
-      title,
-      description,
-      instructor,
-      start_time,
-      duration,
-      capacity
-    } = req.body;
+  try { 
+    const result = await client.query(`
+      INSERT INTO bookings (user_id, class_id) VALUES ($1, $2) RETURNING *
+      `, [user_id, class_id] )
 
-    if (!title || !instructor || !start_time || !duration || !capacity) {
-      return res.status(400).json({ message: "Missing required fields"})
-    }
-
-    const result = await client.query(
-      `INSERT INTO classes (title, description, instructor, start_time, duration, capacity)
-      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title, description, instructor, start_time, duration, capacity]
-    )
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Create class error");
+    res.status(201).json({ message: "Booking successfully."})
+  } catch(error) {
+    console.error(error)
+    res.status(400).send({ message: "Booking failed."})
   } finally {
     client.release();
   }
+})
 
+// Remove Booking (DONE)
+
+app.delete('/classes/:class_id/:user_id', async(req, res) => {
+  const client = await pool.connect();
+  const { class_id, user_id } = req.params;
+
+  try { 
+    const result = await client.query(`
+      DELETE FROM bookings WHERE class_id = $1 AND user_id = $2
+      `, [class_id, user_id])
+
+    res.status(201).json({ message: "Cancel booking successfully."})
+  } catch(error) {
+    console.error(error)
+    res.status(400).send({ message: "Cancel booking failed."})
+  } finally {
+    client.release();
+  }
+})
+
+// List User Bookings (Done)
+
+app.get('/classes/booked/:user_id', async(req, res) => {
+  const client = await pool.connect();
+  const { user_id } = req.params;
+
+  try {
+    const result = await client.query(`
+    SELECT
+    classes.id,
+    classes.title,
+    classes.instructor,
+    classes.start_time,
+    classes.duration,
+    classes.capacity,
+    COUNT(bookings.id) AS total_bookings
+    FROM classes
+    INNER JOIN bookings
+    ON classes.id = bookings.class_id
+    WHERE bookings.user_id = $1
+    GROUP BY
+    classes.id,
+    classes.title,
+    classes.instructor,
+    classes.start_time,
+    classes.duration,
+    classes.capacity;`
+    , [user_id])
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(404).send({ message: "List All Bookings Error"})
+  } finally {
+    client.release();
+  }
+})
+
+// List All Available Classes (DONE)
+
+app.get('/classes', async (req, res) => {
+  const client = await pool.connect();
+  const { user_id } = req.query;
+
+  try {
+    const result = await client.query(`
+      SELECT
+        classes.id,
+        classes.title,
+        classes.instructor,
+        classes.start_time,
+        classes.duration,
+        classes.capacity,
+        COUNT(bookings.id) AS total_bookings,
+        BOOL_OR(bookings.user_id = $1) AS is_booked
+      FROM classes
+      LEFT JOIN bookings
+        ON classes.id = bookings.class_id
+      GROUP BY classes.id
+      ORDER BY classes.id;
+    `, [user_id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error)
+    res.status(404).send({ message: "List All Classes Error"})
+  } finally {
+    client.release();
+  }
 })
 
 // Sign Up
@@ -161,6 +174,10 @@ app.post('/signup', async (req, res) => {
 
     if (userResult.rows.length > 0) {
       return res.status(400).json({ message: "Username is taken." });
+    }
+
+    if (!username || !email || !password || !phone_number) {
+      return res.status(400).json({ message: "Missing required fields." });
     }
 
     const emailResult = await client.query('SELECT * FROM users WHERE email = $1', [email]);
