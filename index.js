@@ -32,14 +32,43 @@ async function getPostgresVersion() {
 
 getPostgresVersion();
 
-// Get Users username (done)
+// Update Users details (done)
+
+app.put('/users/:user_id', async(req,res) => {
+  const client =await pool.connect();
+  const { user_id } = req.params;
+  const { username, email, password, phone_number } = req.body;
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const result = await client.query(`
+      UPDATE users 
+      SET username = $1, 
+      email = $2, 
+      password = $3,
+      phone_number = $4
+      WHERE id = $5
+      RETURNING *`
+      , [username, email, hashedPassword, phone_number, user_id]
+    )
+
+    res.status(200).json(result.rows[0]);
+  } catch(error) {
+    console.error(error)
+    res.status(500).send({ message: "Update user details failed."})
+  } finally {
+    client.release();
+  }
+})
+
+// Get Users details (done)
 
 app.get('/users/:user_id', async(req,res) => {
   const client =await pool.connect();
   const { user_id } = req.params;
 
   try {
-    const result = await client.query(`SELECT username FROM users WHERE id = $1`
+    const result = await client.query(`SELECT username, email, phone_number FROM users WHERE id = $1`
       , [user_id]
     )
 
@@ -128,6 +157,56 @@ app.get('/classes/booked/:user_id', async(req, res) => {
     client.release();
   }
 })
+
+// Edit Classes (Done)
+
+app.put('/classes/:class_id', async(req, res) => {
+  const client = await pool.connect() 
+  const { class_id } = req.params;
+  const { title, description, instructor, start_time, duration, capacity } = req.body;
+
+  try {
+    const result = await client.query(`
+      UPDATE classes 
+      SET title = $1, 
+      description = $2, 
+      instructor = $3,
+      start_time = $4,
+      duration = $5,
+      capacity = $6
+      WHERE id = $7
+      RETURNING *
+      `, [ title, description, instructor, start_time, duration, capacity, class_id ])
+
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(400).send({ message: "Edit Class Error."})
+  } finally {
+    client.release();
+  }
+})
+
+// Add Classes (Done)
+
+app.post('/classes', async(req,res) => {
+  const client = await pool.connect();
+  const { title, description, instructor, start_time, duration, capacity } = req.body;
+
+  try {
+    const result = await client.query(`
+      INSERT INTO classes (title, description, instructor, start_time, duration, capacity) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *`, [title, description, instructor, start_time, duration, capacity])
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(400).send({ message: "Add Class Error."})
+  } finally {
+    client.release();
+  }
+})
+
 
 // List All Available Classes (DONE)
 
