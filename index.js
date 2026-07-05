@@ -219,6 +219,7 @@ app.get('/classes', async (req, res) => {
       SELECT
         classes.id,
         classes.title,
+        classes.description,
         classes.instructor,
         classes.start_time,
         classes.duration,
@@ -294,7 +295,7 @@ app.post('/login', async(req, res) => {
 
     if (!passwordIsValid) return res.status(401).json({ auth: false, token: null });
 
-    var token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: 86400 });
+    var token = jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET_KEY, { expiresIn: 86400 });
     res.status(200).json({ auth: true, token: token });
   } catch(error) {
     console.error(error)
