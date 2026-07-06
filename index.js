@@ -158,6 +158,29 @@ app.get('/classes/booked/:user_id', async(req, res) => {
   }
 })
 
+// Delete Classes (Done)
+
+app.delete('/classes/:class_id', async (req, res) => {
+  const client = await pool.connect();
+  const { class_id } = req.params;
+
+  try {
+    await client.query(`DELETE FROM bookings WHERE class_id = $1`, [class_id]);
+    const result = await client.query(`DELETE FROM classes WHERE id = $1`, [class_id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: "Class not found." });
+    }
+
+    res.status(204).json({message: "Remove class successfully."});
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ message: "Remove class failed." });
+  } finally {
+    client.release();
+  }
+});
+
 // Edit Classes (Done)
 
 app.put('/classes/:class_id', async(req, res) => {
